@@ -8,6 +8,7 @@ Usage: evidence.py <campaign_id>
 Exit status: 0 every MR passes, 2 at least one MR is BLOCKED, 1 the gate itself failed (error)."""
 import csv
 import difflib
+import fnmatch
 import glob
 import json
 import os
@@ -113,19 +114,36 @@ def diff(base, after, files):
     return "\n".join(out), add, rem, sig
 
 
-def codeowners(path):
-    """Owners of the catch-all rule; as in GitLab and GitHub, the last matching rule wins."""
+def codeowners_match(pattern, rel):
+    """Simplified CODEOWNERS matching: catch-alls, directories, and globs (anchored when they contain a '/')."""
+    if pattern in ("*", "/", "/**"):
+        return True
+    p = pattern.lstrip("/")
+    anchored = pattern.startswith("/") or "/" in p.rstrip("/")
+    if p.endswith("/"):
+        return rel.startswith(p) if anchored else ("/" + p) in ("/" + rel)
+    if p.endswith("/**"):
+        return rel.startswith(p[:-2]) if anchored else ("/" + p[:-2]) in ("/" + rel)
+    if anchored:
+        return fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")
+    return any(fnmatch.fnmatchcase(seg, p) for seg in rel.split("/"))
+
+
+def codeowners(path, files):
+    """Owners of the changed files; as in GitLab and GitHub, the last matching rule wins for each file."""
+    rules = [parts for parts in (line.split("#", 1)[0].split() for line in open(path)) if parts]
     owners = []
-    for line in open(path):
-        parts = line.split("#", 1)[0].split()
-        if len(parts) > 1 and parts[0] in ("*", "/", "/**"):
-            owners = parts[1:]
+    for rel in files or [""]:
+        hit = [r[1:] for r in rules if codeowners_match(r[0], rel)]
+        for o in (hit[-1] if hit else []):
+            if o not in owners:
+                owners.append(o)
     return owners
 
 
-def owner(name, repo_dir, inventory):
+def owner(name, repo_dir, inventory, files=()):
     co = os.path.join(repo_dir, "CODEOWNERS")
-    owners = codeowners(co) if os.path.exists(co) else []
+    owners = codeowners(co, list(files)) if os.path.exists(co) else []
     if owners:
         return "CODEOWNERS", owners
     inv = inventory.get(name, {})
@@ -192,7 +210,7 @@ def main(cid):
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
         suppressed = [x for x in patch.splitlines() if x.startswith("+") and not x.startswith("+++") and scan.SUPPRESS in x]
-        osrc, owners = owner(name, base, inventory)
+        osrc, owners = owner(name, base, inventory, fix_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 
         checks = [("Scanner: " + camp["rule"] + " findings", str(len(hit_b)), str(len(hit_a)), len(hit_b) > 0 and not hit_a),
