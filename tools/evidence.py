@@ -113,9 +113,10 @@ def diff(base, after, files):
     return "\n".join(out), add, rem, sig
 
 
-def count_suppressions(root, rel):
-    p = os.path.join(root, rel)
-    return open(p).read().count(scan.SUPPRESS) if os.path.exists(p) else 0
+def suppressed_sinks(root):
+    """Risky joins the scanner skips only because of an inline suppression, keyed by file and code."""
+    return {(f["file"], f["snippet"].split(scan.SUPPRESS)[0].rstrip(" #/*"))
+            for f in scan.sast(root, honour_suppress=False) if scan.SUPPRESS in f["snippet"]}
 
 
 def codeowners_glob(p):
@@ -228,7 +229,7 @@ def main(cid):
         t_before = run_tests(lang, before)
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
-        suppressed = [rel for rel in fix_files if count_suppressions(after, rel) > count_suppressions(base, rel)]
+        suppressed = sorted(suppressed_sinks(after) - suppressed_sinks(base))
         osrc, owners = owner(name, base, inventory, fix_files + test_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 

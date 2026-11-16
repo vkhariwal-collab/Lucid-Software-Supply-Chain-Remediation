@@ -28,7 +28,7 @@ def ver(v):
     return tuple(int(x) for x in v.lstrip("v").split("."))
 
 
-def sast(repo):
+def sast(repo, honour_suppress=True):
     out = []
     for dirpath, dirs, files in os.walk(repo):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
@@ -43,7 +43,7 @@ def sast(repo):
             code = ["" if x.lstrip().startswith(COMMENT) else x for x in lines]
             for i, line in enumerate(lines, 1):
                 near = code[max(0, i - 1 - GUARD_WINDOW): i + GUARD_WINDOW]
-                if sink.search(line) and SUPPRESS not in line and not any(guard.search(x) for x in near):
+                if sink.search(line) and not (honour_suppress and SUPPRESS in line) and not any(guard.search(x) for x in near):
                     out.append({"rule": "CWE-22", "severity": "high", "file": os.path.relpath(p, repo),
                                 "line": i, "snippet": line.strip(),
                                 "message": "Path built from caller input without a containment check"})
