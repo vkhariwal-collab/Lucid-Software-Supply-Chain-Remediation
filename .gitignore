@@ -1,6 +1,6 @@
-.work/
-backlog/
-out/
-reports/
+/.work/
+/backlog/
+/out/
+/reports/
 __pycache__/
 build/
