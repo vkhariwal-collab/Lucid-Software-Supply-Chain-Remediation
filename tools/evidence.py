@@ -6,6 +6,7 @@ exploit regression test on the vulnerable baseline (must fail) and on the fix (m
 check the diff is minimal and signatures are unchanged, resolve an owner, and draft the Jira updates.
 Usage: evidence.py <campaign_id>
 Exit status: 0 every MR passes, 2 at least one MR is BLOCKED, 1 the gate itself failed (error)."""
+import collections
 import csv
 import difflib
 import glob
@@ -113,10 +114,15 @@ def diff(base, after, files):
     return "\n".join(out), add, rem, sig
 
 
-def suppressed_sinks(root):
-    """Risky joins the scanner skips only because of an inline suppression, keyed by file and code."""
-    return {(f["file"], f["snippet"].split(scan.SUPPRESS)[0].rstrip(" #/*"))
-            for f in scan.sast(root, honour_suppress=False) if scan.SUPPRESS in f["snippet"]}
+def suppressions(root, files):
+    """Lines carrying a suppression marker, counted by file and by the code before the marker."""
+    out = collections.Counter()
+    for rel in files:
+        p = os.path.join(root, rel)
+        if os.path.exists(p):
+            out.update((rel, x.split(scan.SUPPRESS)[0].strip().rstrip("#/* ").strip())
+                       for x in open(p).read().splitlines() if scan.SUPPRESS in x)
+    return out
 
 
 def codeowners_glob(p):
@@ -229,7 +235,7 @@ def main(cid):
         t_before = run_tests(lang, before)
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
-        suppressed = sorted(suppressed_sinks(after) - suppressed_sinks(base))
+        suppressed = sorted((suppressions(after, fix_files) - suppressions(base, fix_files)).elements())
         osrc, owners = owner(name, base, inventory, fix_files + test_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 
