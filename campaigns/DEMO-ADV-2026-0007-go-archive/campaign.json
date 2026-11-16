@@ -1,0 +1,11 @@
+{
+  "id": "DEMO-ADV-2026-0007-go-archive",
+  "title": "Upgrade internal go-archive to v1.4.1 (Zip Slip, DEMO-ADV-2026-0007)",
+  "kind": "dependency",
+  "rule": "DEMO-ADV-2026-0007",
+  "severity": "critical",
+  "repos": [
+    {"name": "ota-artifact-api", "lang": "go", "action": "fix"},
+    {"name": "fleet-exports",    "lang": "go", "action": "fix"}
+  ]
+}

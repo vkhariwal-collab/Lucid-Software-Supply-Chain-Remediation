@@ -1,0 +1,6 @@
+.work/
+backlog/
+out/
+reports/
+__pycache__/
+build/

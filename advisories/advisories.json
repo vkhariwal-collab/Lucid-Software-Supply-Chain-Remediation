@@ -1,0 +1,5 @@
+[
+  {"id": "DEMO-ADV-2026-0007", "ecosystem": "go", "package": "example.com/go-archive",
+   "vulnerable_below": "1.4.1", "fixed": "1.4.1", "cwe": "CWE-22", "severity": "critical",
+   "summary": "Zip Slip: Extract writes archive entries outside the destination directory"}
+]

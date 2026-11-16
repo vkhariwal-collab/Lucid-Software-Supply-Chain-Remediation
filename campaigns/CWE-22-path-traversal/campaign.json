@@ -1,0 +1,16 @@
+{
+  "id": "CWE-22-path-traversal",
+  "title": "Path traversal in file-serving helpers (CWE-22)",
+  "kind": "code",
+  "rule": "CWE-22",
+  "severity": "high",
+  "repos": [
+    {"name": "svc-warranty-docs",   "lang": "java",   "action": "fix"},
+    {"name": "ota-artifact-api",    "lang": "go",     "action": "fix"},
+    {"name": "retail-portal-bff",   "lang": "ts",     "action": "fix"},
+    {"name": "service-reports",     "lang": "python", "action": "fix"},
+    {"name": "dealer-tools-legacy", "lang": "python", "action": "fix"},
+    {"name": "fleet-exports",       "lang": "go",     "action": "false_positive",
+     "justification": "The joined name is the compile-time constant reportFile (exports.go); no request data reaches filepath.Join."}
+  ]
+}

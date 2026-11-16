@@ -1,0 +1,9 @@
+# Illustrative: run the evidence gate on every Devin remediation MR.
+remediation-evidence:
+  stage: test
+  rules:
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /devin-campaign/'
+  script:
+    - python3 tools/evidence.py "$CAMPAIGN_ID"
+  artifacts:
+    paths: [reports/]

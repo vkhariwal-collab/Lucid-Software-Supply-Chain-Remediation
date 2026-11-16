@@ -1,0 +1,2 @@
+{"_note": "Assumed remediation SLAs in days; replace with the CISO's policy.",
+ "critical": 7, "high": 30, "medium": 90, "low": 180, "as_of": "2026-11-16"}
