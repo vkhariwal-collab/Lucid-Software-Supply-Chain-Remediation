@@ -8,7 +8,6 @@ Usage: evidence.py <campaign_id>
 Exit status: 0 every MR passes, 2 at least one MR is BLOCKED, 1 the gate itself failed (error)."""
 import csv
 import difflib
-import fnmatch
 import glob
 import json
 import os
@@ -119,19 +118,34 @@ def count_suppressions(root, rel):
     return open(p).read().count(scan.SUPPRESS) if os.path.exists(p) else 0
 
 
+def codeowners_glob(p):
+    out, i = "", 0
+    while i < len(p):
+        if p.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif p.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif p[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif p[i] == "?":
+            out, i = out + "[^/]", i + 1
+        else:
+            out, i = out + re.escape(p[i]), i + 1
+    return out
+
+
 def codeowners_match(pattern, rel):
-    """Simplified CODEOWNERS matching: catch-alls, directories, and globs (anchored when they contain a '/')."""
+    """CODEOWNERS (gitignore-style) matching: `*` stays within one path segment, `**` crosses them,
+    a pattern with a non-trailing '/' is anchored to the repo root, and a matched directory owns its contents."""
     if pattern in ("*", "/", "/**"):
         return True
     p = pattern.lstrip("/")
     anchored = pattern.startswith("/") or "/" in p.rstrip("/")
-    if p.endswith("/"):
-        return rel.startswith(p) if anchored else ("/" + p) in ("/" + rel)
-    if p.endswith("/**"):
-        return rel.startswith(p[:-2]) if anchored else ("/" + p[:-2]) in ("/" + rel)
-    if anchored:
-        return fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")
-    return any(fnmatch.fnmatchcase(seg, p) for seg in rel.split("/"))
+    directory = p.endswith("/")
+    p = p.rstrip("/")
+    last = p.rsplit("/", 1)[-1]
+    contents = "/.*" if directory else ("(?:/.*)?" if "*" not in last or last == "**" else "")
+    return re.fullmatch(("" if anchored else "(?:.*/)?") + codeowners_glob(p) + contents, rel) is not None
 
 
 def codeowners(path, files):
