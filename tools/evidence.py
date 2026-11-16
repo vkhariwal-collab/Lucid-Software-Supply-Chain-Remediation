@@ -235,7 +235,7 @@ def main(cid):
         t_before = run_tests(lang, before)
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
-        suppressed = sorted((suppressions(after, fix_files) - suppressions(base, fix_files)).elements())
+        suppressed = sorted((suppressions(after, fix_files + test_files) - suppressions(base, fix_files + test_files)).elements())
         osrc, owners = owner(name, base, inventory, fix_files + test_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 
