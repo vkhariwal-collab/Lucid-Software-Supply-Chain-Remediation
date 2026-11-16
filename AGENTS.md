@@ -9,8 +9,9 @@
 1. The scanner finding for the campaign rule is gone, and no new findings appear.
 2. Existing tests pass before and after.
 3. If the repo has no tests: write characterization tests first that pass on the unchanged code.
-4. An exploit regression test that FAILS on the vulnerable code and passes on the fix.
-5. If any check fails, the MR is BLOCKED and the ticket goes to "Needs engineer". Do not weaken tests.
+4. An exploit regression test that FAILS on an assertion on the vulnerable code (not a build, import or runtime error) and passes on the fix.
+5. A fix never adds a scanner suppression (`cwe22-safe:`); suppressions are only for false positives.
+6. If any check fails, the MR is BLOCKED and the ticket goes to "Needs engineer". Do not weaken tests.
 
 ## False positives
 - Close only with a written justification and an inline `cwe22-safe:` style comment; product security approves.

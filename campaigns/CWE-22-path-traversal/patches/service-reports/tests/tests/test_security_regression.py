@@ -10,7 +10,7 @@ class SecurityRegressionTest(unittest.TestCase):
     def test_rejects_traversal(self):
         root = tempfile.mkdtemp()
         base = os.path.join(root, "store")
-        os.makedirs(base)
+        os.makedirs(os.path.join(base, "costa-mesa"))
         secret = os.path.join(root, "secret.txt")
         with open(secret, "w") as f:
             f.write("smtp-password")

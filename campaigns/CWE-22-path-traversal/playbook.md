@@ -14,4 +14,5 @@
 5. Run `tools/evidence.py`; open the MR only if the verdict is READY.
 
 **Do not:** strip directory components (`basename`): it breaks nested paths (see `CWE-22-naive-fix-example`).
-**Reviewer note:** symlinks inside the store are followed; flag if the store is user-writable.
+**Reviewer note:** the Go, Java and TypeScript patterns are lexical, so symlinks inside the store are followed;
+the Python pattern (`realpath`) resolves them and rejects links that point outside. Flag if the store is user-writable.

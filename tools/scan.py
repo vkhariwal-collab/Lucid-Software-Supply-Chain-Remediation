@@ -11,7 +11,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# CWE-22: a filesystem join whose result is not checked for containment in the same file.
+# CWE-22: a filesystem join with no containment check on a code line within GUARD_WINDOW lines of it.
 CWE22 = {
     ".py": (re.compile(r"os\.path\.join\("), re.compile(r"os\.path\.commonpath\(")),
     ".go": (re.compile(r"filepath\.Join\("), re.compile(r"filepath\.IsLocal\(")),
@@ -19,6 +19,8 @@ CWE22 = {
     ".ts": (re.compile(r"path\.join\("), re.compile(r"\.startsWith\(\s*root")),
 }
 SUPPRESS = "cwe22-safe:"
+GUARD_WINDOW = 5
+COMMENT = ("#", "//", "/*", "*")
 SKIP_DIRS = {"tests", "test", "node_modules", "build", ".git"}
 
 
@@ -37,10 +39,11 @@ def sast(repo):
             p = os.path.join(dirpath, fn)
             src = open(p, encoding="utf-8").read()
             sink, guard = CWE22[ext]
-            if guard.search(src):
-                continue
-            for i, line in enumerate(src.splitlines(), 1):
-                if sink.search(line) and SUPPRESS not in line:
+            lines = src.splitlines()
+            code = ["" if x.lstrip().startswith(COMMENT) else x for x in lines]
+            for i, line in enumerate(lines, 1):
+                near = code[max(0, i - 1 - GUARD_WINDOW): i + GUARD_WINDOW]
+                if sink.search(line) and SUPPRESS not in line and not any(guard.search(x) for x in near):
                     out.append({"rule": "CWE-22", "severity": "high", "file": os.path.relpath(p, repo),
                                 "line": i, "snippet": line.strip(),
                                 "message": "Path built from caller input without a containment check"})

@@ -1,0 +1,6 @@
+{
+  "id": "CWE-22-gate-bypass-example",
+  "title": "Counter-example: a suppression comment plus an exploit test that only fails on an import error",
+  "kind": "code", "rule": "CWE-22", "severity": "high", "draft_jira": false,
+  "repos": [{"name": "service-reports", "lang": "python", "action": "fix"}]
+}

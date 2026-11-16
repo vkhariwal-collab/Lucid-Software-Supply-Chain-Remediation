@@ -1,6 +1,6 @@
 {
   "id": "CWE-22-naive-fix-example",
   "title": "Counter-example: a naive CWE-22 fix that the evidence gate must block",
-  "kind": "code", "rule": "CWE-22", "severity": "high",
+  "kind": "code", "rule": "CWE-22", "severity": "high", "draft_jira": false,
   "repos": [{"name": "retail-portal-bff", "lang": "ts", "action": "fix"}]
 }

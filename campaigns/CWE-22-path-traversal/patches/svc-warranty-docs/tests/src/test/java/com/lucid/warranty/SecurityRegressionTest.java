@@ -7,7 +7,8 @@ import java.nio.file.Path;
 public class SecurityRegressionTest {
     public static void main(String[] args) throws Exception {
         Path root = Files.createTempDirectory("att-root");
-        Path base = Files.createDirectories(root.resolve("store"));
+        Path base = root.resolve("store");
+        Files.createDirectories(base.resolve("claim"));
         Path secret = root.resolve("secret.txt");
         Files.writeString(secret, "db-password");
         AttachmentStore store = new AttachmentStore(base);

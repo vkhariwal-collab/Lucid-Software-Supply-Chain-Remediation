@@ -1,0 +1,6 @@
+{
+  "id": "CWE-22-no-tests-example",
+  "title": "Counter-example: a real fix in a repo with no tests, shipped without characterization tests",
+  "kind": "code", "rule": "CWE-22", "severity": "high", "draft_jira": false,
+  "repos": [{"name": "dealer-tools-legacy", "lang": "python", "action": "fix"}]
+}
