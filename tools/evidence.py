@@ -114,6 +114,11 @@ def diff(base, after, files):
     return "\n".join(out), add, rem, sig
 
 
+def count_suppressions(root, rel):
+    p = os.path.join(root, rel)
+    return open(p).read().count(scan.SUPPRESS) if os.path.exists(p) else 0
+
+
 def codeowners_match(pattern, rel):
     """Simplified CODEOWNERS matching: catch-alls, directories, and globs (anchored when they contain a '/')."""
     if pattern in ("*", "/", "/**"):
@@ -209,7 +214,7 @@ def main(cid):
         t_before = run_tests(lang, before)
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
-        suppressed = [x for x in patch.splitlines() if x.startswith("+") and not x.startswith("+++") and scan.SUPPRESS in x]
+        suppressed = [rel for rel in fix_files if count_suppressions(after, rel) > count_suppressions(base, rel)]
         osrc, owners = owner(name, base, inventory, fix_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 
