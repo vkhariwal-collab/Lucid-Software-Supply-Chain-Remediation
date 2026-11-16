@@ -10,7 +10,7 @@ class SecurityRegressionTest(unittest.TestCase):
     def test_rejects_traversal(self):
         root = tempfile.mkdtemp()
         base = os.path.join(root, "templates")
-        os.makedirs(base)
+        os.makedirs(os.path.join(base, "ca"))
         secret = os.path.join(root, "secret.txt")
         with open(secret, "w", encoding="utf-8") as f:
             f.write("dms-api-token")

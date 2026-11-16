@@ -4,6 +4,7 @@ remediation-evidence:
   rules:
     - if: '$CI_MERGE_REQUEST_LABELS =~ /devin-campaign/'
   script:
-    - python3 tools/evidence.py "$CAMPAIGN_ID"
+    - python3 tools/generate_backlog.py   # backlog/ is generated, not committed
+    - python3 tools/evidence.py "$CAMPAIGN_ID"   # exit 2 = an MR is BLOCKED, 1 = gate error
   artifacts:
     paths: [reports/]

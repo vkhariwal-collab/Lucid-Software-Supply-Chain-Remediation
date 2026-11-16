@@ -22,8 +22,10 @@ class LoadTemplateBehaviour(unittest.TestCase):
             load_template("tx/none.txt", self.base)
 
     def test_env_default_dir(self):
-        os.environ["TEMPLATE_DIR"] = self.base
         import importlib
+        from unittest import mock
         import tools.templates as t
-        importlib.reload(t)
-        self.assertTrue(t.load_template("ca/delivery.txt").startswith("Delivered by Lucid Studio"))
+        self.addCleanup(importlib.reload, t)
+        with mock.patch.dict(os.environ, {"TEMPLATE_DIR": self.base}):
+            importlib.reload(t)
+            self.assertTrue(t.load_template("ca/delivery.txt").startswith("Delivered by Lucid Studio"))

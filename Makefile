@@ -1,6 +1,10 @@
 PY := python3
 export PATH := $(HOME)/.local/node/bin:$(PATH)
-.PHONY: help backlog triage scan campaign-cwe22 campaign-dep naive-fix demo clean
+.PHONY: help backlog triage scan campaign-cwe22 campaign-dep naive-fix gate-selftest demo clean
+
+# evidence.py exits 2 when an MR is BLOCKED and 1 when the gate itself errors; only 2 counts as "blocked".
+expect_blocked = $(PY) tools/evidence.py $(1); rc=$$?; if [ $$rc -eq 2 ]; then printf '%s\n' "  gate blocked $(1), as intended"; \
+	else echo "  $(1): expected BLOCKED (exit 2), got exit $$rc"; exit 1; fi
 
 help:            ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -21,10 +25,14 @@ campaign-cwe22: triage ## Step 3: code campaign (CWE-22) across Java, Go, TS, Py
 	$(PY) tools/evidence.py CWE-22-path-traversal
 
 naive-fix: triage      ## Step 4: a plausible-looking fix that breaks behaviour; the gate must BLOCK it
-	@! $(PY) tools/evidence.py CWE-22-naive-fix-example && echo "\nGate blocked the naive fix, as intended."
+	@$(call expect_blocked,CWE-22-naive-fix-example)
 
-demo: triage campaign-dep campaign-cwe22 naive-fix ## everything, in demo order
-	@echo "\nAll demo checks passed. Reports in reports/, Jira drafts in out/."
+gate-selftest: triage  ## the gate must BLOCK a suppressed non-fix and a no-tests repo without characterization tests
+	@$(call expect_blocked,CWE-22-gate-bypass-example)
+	@$(call expect_blocked,CWE-22-no-tests-example)
+
+demo: triage campaign-dep campaign-cwe22 naive-fix gate-selftest ## everything, in demo order
+	@printf "\nAll demo checks passed. Reports in reports/, Jira drafts in out/.\n"
 
 clean:
 	rm -rf .work reports/* out backlog/*

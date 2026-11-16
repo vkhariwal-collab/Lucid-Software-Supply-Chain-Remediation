@@ -4,7 +4,9 @@
 For each repo: scan before/after, run existing tests, Devin-written characterization tests and the
 exploit regression test on the vulnerable baseline (must fail) and on the fix (must pass),
 check the diff is minimal and signatures are unchanged, resolve an owner, and draft the Jira updates.
-Usage: evidence.py <campaign_id>"""
+Usage: evidence.py <campaign_id>
+Exit status: 0 every MR passes, 2 at least one MR is BLOCKED, 1 the gate itself failed (error)."""
+import collections
 import csv
 import difflib
 import glob
@@ -22,6 +24,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV = dict(os.environ, GOFLAGS="-mod=mod", GOPROXY="off", GOTOOLCHAIN="local", PYTHONDONTWRITEBYTECODE="1")
 NODE = shutil.which("node") or os.path.expanduser("~/.local/node/bin/node")
 SIG = re.compile(r"^\s*(func |public |export function|def )")
+EXIT_BLOCKED = 2
+# A failing exploit test only counts if it failed on an assertion, not on a build, import or runtime error.
+ASSERTION = {
+    "python": (re.compile(r"^FAILED \(failures=\d+\)$", re.M), None),
+    "go": (re.compile(r"^\s*--- FAIL: ", re.M), re.compile(r"\[build failed\]|\[setup failed\]|^panic: ", re.M)),
+    "ts": (re.compile(r"ERR_ASSERTION"), re.compile(r"ERR_MODULE_NOT_FOUND|SyntaxError|ReferenceError")),
+    "java": (re.compile(r"^  FAIL ", re.M), re.compile(r"^Exception in thread|\berror:", re.M)),
+}
 
 
 def group(name):
@@ -30,8 +40,19 @@ def group(name):
 
 
 def run(cmd, cwd):
-    p = subprocess.run(cmd, cwd=cwd, env=ENV, capture_output=True, text=True, timeout=600)
-    return p.returncode == 0, (p.stdout + p.stderr)[-1500:]
+    try:
+        p = subprocess.run(cmd, cwd=cwd, env=ENV, capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        return False, f"timed out: {' '.join(cmd)}"
+    return p.returncode == 0, p.stdout + p.stderr
+
+
+def failed_on_assertion(lang, result):
+    passed, log = result
+    if passed is not False:
+        return False
+    good, bad = ASSERTION[lang]
+    return bool(good.search(log)) and not (bad and bad.search(log))
 
 
 def run_tests(lang, repo):
@@ -78,6 +99,7 @@ def copy_tree(src, dst):
 
 
 def diff(base, after, files):
+    """Unified diff of the fix, line counts, and public signatures removed or changed (additions are fine)."""
     out, add, rem, sig = [], 0, 0, []
     for rel in files:
         a = open(os.path.join(base, rel)).read().splitlines() if os.path.exists(os.path.join(base, rel)) else []
@@ -88,14 +110,68 @@ def diff(base, after, files):
         rem += sum(1 for x in d if x.startswith("-") and not x.startswith("---"))
         sa = {x.strip() for x in a if SIG.match(x)}
         sb = {x.strip() for x in b if SIG.match(x)}
-        sig += sorted(sa ^ sb)
+        sig += sorted(sa - sb)
     return "\n".join(out), add, rem, sig
 
 
-def owner(name, repo_dir, inventory):
+def suppressions(root, files):
+    """Lines carrying a suppression marker, counted by file and by the code before the marker."""
+    out = collections.Counter()
+    for rel in files:
+        p = os.path.join(root, rel)
+        if os.path.exists(p):
+            out.update((rel, x.split(scan.SUPPRESS)[0].strip().rstrip("#/* ").strip())
+                       for x in open(p).read().splitlines() if scan.SUPPRESS in x)
+    return out
+
+
+def codeowners_glob(p):
+    out, i = "", 0
+    while i < len(p):
+        if p.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif p.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif p[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif p[i] == "?":
+            out, i = out + "[^/]", i + 1
+        else:
+            out, i = out + re.escape(p[i]), i + 1
+    return out
+
+
+def codeowners_match(pattern, rel):
+    """CODEOWNERS (gitignore-style) matching: `*` stays within one path segment, `**` crosses them,
+    a pattern with a non-trailing '/' is anchored to the repo root, and a matched directory owns its contents."""
+    if pattern in ("*", "/", "/**"):
+        return True
+    p = pattern.lstrip("/")
+    anchored = pattern.startswith("/") or "/" in p.rstrip("/")
+    directory = p.endswith("/")
+    p = p.rstrip("/")
+    last = p.rsplit("/", 1)[-1]
+    contents = "/.*" if directory else ("(?:/.*)?" if "*" not in last or last == "**" else "")
+    return re.fullmatch(("" if anchored else "(?:.*/)?") + codeowners_glob(p) + contents, rel) is not None
+
+
+def codeowners(path, files):
+    """Owners of the changed files; as in GitLab and GitHub, the last matching rule wins for each file."""
+    rules = [parts for parts in (line.split("#", 1)[0].split() for line in open(path)) if parts]
+    owners = []
+    for rel in files or [""]:
+        hit = [r[1:] for r in rules if codeowners_match(r[0], rel)]
+        for o in (hit[-1] if hit else []):
+            if o not in owners:
+                owners.append(o)
+    return owners
+
+
+def owner(name, repo_dir, inventory, files=()):
     co = os.path.join(repo_dir, "CODEOWNERS")
-    if os.path.exists(co):
-        return "CODEOWNERS", open(co).read().split()[1:]
+    owners = codeowners(co, list(files)) if os.path.exists(co) else []
+    if owners:
+        return "CODEOWNERS", owners
     inv = inventory.get(name, {})
     if inv.get("owner_source") == "committers":
         return "recent committers (suggested, confirm)", inv["owners"]
@@ -106,9 +182,20 @@ def fmt(r):
     return "n/a (none)" if r[0] is None else ("pass" if r[0] else "FAIL")
 
 
+def fmt_exploit(lang, r):
+    if r[0] is False:
+        return "FAIL (assertion)" if failed_on_assertion(lang, r) else "FAIL (error, not an assertion)"
+    return fmt(r)
+
+
 def main(cid):
     cdir = os.path.join(ROOT, "campaigns", cid)
     camp = json.load(open(os.path.join(cdir, "campaign.json")))
+    if not os.path.exists(os.path.join(ROOT, "backlog", "inventory.json")):
+        sys.exit("backlog/ not found: run `make backlog` (tools/generate_backlog.py) first")
+    # Simulated MR numbers: a block of 100 per campaign so numbers never repeat across campaigns.
+    mr_base = 4000 + 100 * (1 + sorted(os.listdir(os.path.join(ROOT, "campaigns"))).index(cid))
+    draft_jira = camp.get("draft_jira", True)
     inventory = {r["name"]: r for r in json.load(open(os.path.join(ROOT, "backlog", "inventory.json")))}
     tickets = list(csv.DictReader(open(os.path.join(ROOT, "backlog", "jira_queue.csv"))))
     work = os.path.join(ROOT, ".work", cid)
@@ -148,20 +235,26 @@ def main(cid):
         t_before = run_tests(lang, before)
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
-        osrc, owners = owner(name, base, inventory)
+        suppressed = sorted((suppressions(after, fix_files + test_files) - suppressions(base, fix_files + test_files)).elements())
+        osrc, owners = owner(name, base, inventory, fix_files + test_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 
         checks = [("Scanner: " + camp["rule"] + " findings", str(len(hit_b)), str(len(hit_a)), len(hit_b) > 0 and not hit_a),
                   ("New findings introduced (any rule)", "-", str(len(new)), not new)]
         if r["action"] == "fix":
+            covered = t_after["existing"][0] is not None or t_after["char"][0] is not None
             checks += [
+                (f"Scanner suppressions added (`{scan.SUPPRESS}`); a fix must not silence the scanner", "-",
+                 str(len(suppressed)), not suppressed),
                 ("Existing tests", fmt(t_before["existing"]), fmt(t_after["existing"]),
                  t_before["existing"][0] is not False and t_after["existing"][0] is not False),
                 ("Characterization tests (Devin-written, lock current behaviour)", fmt(t_before["char"]), fmt(t_after["char"]),
                  t_before["char"][0] is not False and t_after["char"][0] is not False),
-                ("Exploit regression test (must FAIL before, pass after)", fmt(t_before["exploit"]), fmt(t_after["exploit"]),
-                 t_before["exploit"][0] is False and t_after["exploit"][0] is True),
-                ("Public signatures changed", "-", str(len(sig)), not sig)]
+                ("Behaviour covered by existing or characterization tests", "-", "yes" if covered else "none", covered),
+                ("Exploit regression test (must FAIL on an assertion before, pass after)",
+                 fmt_exploit(lang, t_before["exploit"]), fmt(t_after["exploit"]),
+                 failed_on_assertion(lang, t_before["exploit"]) and t_after["exploit"][0] is True),
+                ("Public signatures removed or changed", "-", str(len(sig)), not sig)]
             ok = all(c[3] for c in checks)
             verdict = ("READY FOR OWNER REVIEW" if osrc == "CODEOWNERS" else ("READY: routed to product security" if osrc.startswith("none") else "READY: owner to confirm")) if ok else "BLOCKED"
             transition = "Fix in review" if ok else "Needs engineer"
@@ -172,7 +265,7 @@ def main(cid):
             verdict = "FALSE POSITIVE: needs security approval" if ok else "BLOCKED"
             transition = "Proposed false positive"
         all_ok &= ok
-        mr = f"!{4100 + i}"
+        mr = f"!{mr_base + i}"
         L = [f"# Evidence pack: {name} · {camp['id']}", "",
              f"**Verdict: {verdict}**  ·  simulated GitLab MR {mr}  ·  language: {lang}", "",
              f"- Owner: {', '.join(owners)} ({osrc})",
@@ -190,23 +283,30 @@ def main(cid):
             L += ["<details><summary>Exploit test output on the vulnerable code</summary>", "", "```",
                   t_before["exploit"][1].strip()[-900:], "```", "</details>", ""]
         open(os.path.join(edir, f"{name}.md"), "w").write("\n".join(L))
-        summary.append((name, lang, verdict, len(hit_b), len(hit_a), fmt(t_before["exploit"]), fmt(t_after["exploit"]),
-                        add + rem, ", ".join(owners), len(keys)))
-        for k in keys:
+        summary.append((name, lang, verdict, len(hit_b), len(hit_a), fmt_exploit(lang, t_before["exploit"]),
+                        fmt(t_after["exploit"]), add + rem, ", ".join(owners), len(keys)))
+        for k in keys if draft_jira else []:
             jira.append(dict(ticket=k, transition=transition, mr=mr, evidence=f"reports/evidence/{cid}/{name}.md",
                              labels=["devin-campaign", cid]))
-        print(f"  {name:<20} {lang:<6} {verdict:<40} findings {len(hit_b)}->{len(hit_a)}  exploit {fmt(t_before['exploit'])}->{fmt(t_after['exploit'])}")
+        print(f"  {name:<20} {lang:<6} {verdict:<40} findings {len(hit_b)}->{len(hit_a)}  "
+              f"exploit {fmt_exploit(lang, t_before['exploit'])}->{fmt(t_after['exploit'])}")
 
     S = [f"# Campaign: {camp['title']}", "", f"Severity: {camp['severity']} · repos in this demo slice: {len(summary)}", "",
          "| Repo | Lang | Verdict | Findings before → after | Exploit test before → after | Lines changed | Owner | Jira tickets |",
          "|---|---|---|---|---|---|---|---|"]
     S += [f"| {s[0]} | {s[1]} | {s[2]} | {s[3]} → {s[4]} | {s[5]} → {s[6]} | {s[7]} | {s[8]} | {s[9]} |" for s in summary]
-    S += ["", f"Jira updates drafted: {len(jira)} (see `out/jira_updates_{cid}.json`). Evidence per MR in `reports/evidence/{cid}/`."]
+    jpath = os.path.join(ROOT, "out", f"jira_updates_{cid}.json")
+    if draft_jira:
+        S += ["", f"Jira updates drafted: {len(jira)} (see `out/jira_updates_{cid}.json`). Evidence per MR in `reports/evidence/{cid}/`."]
+        os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
+        json.dump(jira, open(jpath, "w"), indent=1)
+    else:
+        S += ["", f"Counter-example campaign: no Jira updates drafted. Evidence per MR in `reports/evidence/{cid}/`."]
+        if os.path.exists(jpath):
+            os.remove(jpath)
     open(os.path.join(ROOT, "reports", f"campaign_{cid}.md"), "w").write("\n".join(S) + "\n")
-    os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
-    json.dump(jira, open(os.path.join(ROOT, "out", f"jira_updates_{cid}.json"), "w"), indent=1)
     print(f"  -> {len(summary)} MRs, {len(jira)} Jira tickets updated; all checks {'PASS' if all_ok else 'FAILED'}")
-    sys.exit(0 if all_ok else 1)
+    sys.exit(0 if all_ok else EXIT_BLOCKED)
 
 
 if __name__ == "__main__":
