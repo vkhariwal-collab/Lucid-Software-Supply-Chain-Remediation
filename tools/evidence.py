@@ -229,7 +229,7 @@ def main(cid):
         t_after = run_tests(lang, after)
         patch, add, rem, sig = diff(base, after, fix_files)
         suppressed = [rel for rel in fix_files if count_suppressions(after, rel) > count_suppressions(base, rel)]
-        osrc, owners = owner(name, base, inventory, fix_files)
+        osrc, owners = owner(name, base, inventory, fix_files + test_files)
         keys = [t["key"] for t in tickets if t["repo"] == name and t["rule"] == camp["rule"]]
 
         checks = [("Scanner: " + camp["rule"] + " findings", str(len(hit_b)), str(len(hit_a)), len(hit_b) > 0 and not hit_a),
